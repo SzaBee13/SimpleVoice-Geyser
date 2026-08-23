@@ -39,7 +39,9 @@ public final class SvgConfig {
         defaults.put("server.audio.transport-mode", "auto");
         defaults.put("server.audio.allow-legacy-fallback", true);
         defaults.put("proxy.enabled", false);
+        defaults.put("proxy.control-url", "");
         defaults.put("proxy.shared-secret", "simplevoice-geyser-proxy-secret");
+        defaults.put("proxy.verify-ssl", true);
         defaults.put("proxy.token-ttl-seconds", 120);
         defaults.put("debug", false);
         defaults.put("updatechecker.enable", true);
@@ -164,9 +166,17 @@ public final class SvgConfig {
     public final ConfigKey<Boolean> PROXY_ENABLED =
             new ConfigKey <>(this, "proxy.enabled", false);
 
+    /** HTTP URL of the Velocity proxy control endpoint, when proxy integration is enabled. */
+    public final ConfigKey<String> PROXY_CONTROL_URL =
+            new ConfigKey<>(this, "proxy.control-url", "");
+
     /** Shared secret used to sign and verify proxy auth tokens (see {@code ProxyAuthToken}). */
     public final ConfigKey<String> PROXY_SHARED_SECRET =
             new ConfigKey <>(this, "proxy.shared-secret", "simplevoice-geyser-proxy-secret");
+
+    /** Whether TLS certificates of the proxy control endpoint are verified (disable for self-signed). */
+    public final ConfigKey<Boolean> PROXY_VERIFY_SSL =
+            new ConfigKey <>(this, "proxy.verify-ssl", true);
 
     /** Lifetime of a proxy auth token, in seconds. */
     public final ConfigKey<Integer> PROXY_TOKEN_TTL_SECONDS =
@@ -205,7 +215,9 @@ public final class SvgConfig {
             AUDIO_TRANSPORT_MODE,
             AUDIO_ALLOW_LEGACY_FALLBACK,
             PROXY_ENABLED,
+            PROXY_CONTROL_URL,
             PROXY_SHARED_SECRET,
+            PROXY_VERIFY_SSL,
             PROXY_TOKEN_TTL_SECONDS,
             DEBUG,
             UPDATE_CHECKER_ENABLED,
