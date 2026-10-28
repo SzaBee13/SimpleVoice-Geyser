@@ -88,17 +88,12 @@ export class SvgWebSocket {
     }
 
     #resetState() {
-        this.#destroyMicEncoder();
+        this.#resetMicNegotiation();
         this.reconnectAttempts = 0;
         this.manualClose = false;
         this.hasJoined = false;
         this.changingServer = false;
         this.fatalAuthError = false;
-        this.capabilitiesSent = false;
-        this.micFormatAcknowledged = false;
-        this.micPcmRenegotiationPending = false;
-        this.selectedMicFormat = "pcm16le";
-        this.audioController.setMicTransmissionEnabled(false);
         this.rxBinaryFrames = 0;
         this.rxBinaryBytes = 0;
         this.rxStereoFrames = 0;
@@ -113,6 +108,9 @@ export class SvgWebSocket {
     }
 
     #createSocket() {
+        this.#resetMicNegotiation();
+        this.hasJoined = false;
+        this.changingServer = false;
         const protocol = location.protocol === "https:" ? "wss:" : "ws:";
         const pageUrl = new URL(window.location.href);
         if (!pageUrl.pathname.endsWith("/")) {
@@ -126,11 +124,12 @@ export class SvgWebSocket {
         const wsUrl = new URL("ws", pageUrl);
         wsUrl.protocol = protocol;
 
-        this.ws = new WebSocket(wsUrl.href);
+        const socket = this.ws = new WebSocket(wsUrl.href);
         this.ws.binaryType = "arraybuffer";
         this.fatalAuthError = false;
 
         this.ws.onopen = () => {
+            if (this.ws !== socket) return;
             this.ws.send(JSON.stringify({
                 type: "join",
                 ...this.lastCredentials,
@@ -150,6 +149,7 @@ export class SvgWebSocket {
         };
 
         this.ws.onmessage = async (event) => {
+            if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return;
             if (typeof event.data === "string") {
                 try {
                     const data = JSON.parse(event.data);
@@ -165,6 +165,7 @@ export class SvgWebSocket {
                         this.changingServer = false;
                         this.hasJoined = true;
                         await this.#sendCapabilitiesOnce();
+                        if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return;
                         this.#runEventListeners("statusChange", {
                             connected: true,
                             username: this.lastCredentials?.username
@@ -194,7 +195,8 @@ export class SvgWebSocket {
 
                     if (packetType === "capabilities_ack") {
                         Logger.log(`[AudioRX] Server selected transport mode: ${data.selectedMode || "legacy"}`);
-                        await this.#applyMicFormatAck(data.selectedMicFormat);
+                        await this.#applyMicFormatAck(data.selectedMicFormat, socket);
+                        if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return;
                     }
 
                     if (packetType === "error") {
@@ -242,6 +244,7 @@ export class SvgWebSocket {
         };
 
         this.ws.onclose = (event) => {
+            if (this.ws && this.ws !== socket) return;
             const code = event.code;
             const reason = event.reason || "";
 
@@ -306,6 +309,7 @@ export class SvgWebSocket {
         };
 
         this.ws.onerror = () => {
+            if (this.ws !== socket) return;
             Logger.log("WebSocket error occurred.");
 
             if (this.ws.readyState !== WebSocket.OPEN) {
@@ -371,10 +375,12 @@ export class SvgWebSocket {
 
         try {
             const caps = await getAudioCapabilities();
+            if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return;
             const runtime = this.audioController.getAudioRuntime();
             const canUseSvgV2 = caps.supportsSvgV2 && runtime.workletSupported;
             const canDecodeOpus = caps.supportsOpusDecoder && runtime.workletSupported;
-            const supportsMicOpus = await this.#configureMicEncoder();
+            const supportsMicOpus = await this.#configureMicEncoder(socket);
+            if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return;
             audio = {
                 protocols: canUseSvgV2 ? ["legacy", "svg-v2"] : ["legacy"],
                 supportsOpusDecoder: canDecodeOpus,
@@ -388,6 +394,7 @@ export class SvgWebSocket {
                 `svg-v2=${canUseSvgV2} opusDecoder=${canDecodeOpus} secure=${caps.secureContext}`
             );
         } catch (err) {
+            if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return;
             this.rxDecoderFallbacks++;
             this.#destroyMicEncoder();
             Logger.log(`[AudioRX] Capability probe failed; sending PCM/legacy capabilities: ${err?.message || err}`);
@@ -398,7 +405,7 @@ export class SvgWebSocket {
         socket.send(JSON.stringify(this.lastCapabilities));
     }
 
-    async #configureMicEncoder() {
+    async #configureMicEncoder(socket) {
         if (this.audioController.getAudioRuntime().sampleRate !== 48000
             || typeof AudioEncoder === "undefined"
             || typeof AudioData === "undefined") {
@@ -408,6 +415,7 @@ export class SvgWebSocket {
         const config = MIC_OPUS_ENCODER_CONFIG;
         try {
             const support = await AudioEncoder.isConfigSupported(config);
+            if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return false;
             if (!support.supported || this.audioController.getAudioRuntime().sampleRate !== 48000) return false;
             this.#destroyMicEncoder();
             const generation = this.micEncoderGeneration;
@@ -445,6 +453,7 @@ export class SvgWebSocket {
             this.micEncoder.configure(support.config || config);
             return true;
         } catch (error) {
+            if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return false;
             this.#destroyMicEncoder();
             Logger.log(`[AudioTX] Opus encoding unavailable: ${error?.message || error}`);
             return false;
@@ -515,13 +524,17 @@ export class SvgWebSocket {
         socket.send(JSON.stringify(payload));
     }
 
-    async #applyMicFormatAck(format) {
+    async #applyMicFormatAck(format, socket) {
         this.audioController.setMicTransmissionEnabled(false);
         this.micFormatAcknowledged = false;
         this.selectedMicFormat = micFormatFromAck(format);
-        if (this.selectedMicFormat === "opus" && !this.micEncoder && !await this.#configureMicEncoder()) {
-            await this.#renegotiatePcmMic(new Error("Opus encoder could not be initialized"));
-            return;
+        if (this.selectedMicFormat === "opus" && !this.micEncoder) {
+            const supported = await this.#configureMicEncoder(socket);
+            if (this.ws !== socket || socket.readyState !== WebSocket.OPEN) return;
+            if (!supported) {
+                await this.#renegotiatePcmMic(new Error("Opus encoder could not be initialized"));
+                return;
+            }
         }
         this.micPcmRenegotiationPending = false;
         this.micFormatAcknowledged = true;
@@ -539,6 +552,16 @@ export class SvgWebSocket {
             }
         }
         this.micEncoder = null;
+    }
+
+    #resetMicNegotiation() {
+        this.#destroyMicEncoder();
+        this.capabilitiesSent = false;
+        this.lastCapabilities = null;
+        this.micFormatAcknowledged = false;
+        this.micPcmRenegotiationPending = false;
+        this.selectedMicFormat = "pcm16le";
+        this.audioController.setMicTransmissionEnabled(false);
     }
 
      async #handleIncomingBinaryFrame(arrayBuffer) {

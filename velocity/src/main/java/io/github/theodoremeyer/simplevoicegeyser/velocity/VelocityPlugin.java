@@ -263,20 +263,19 @@ public final class VelocityPlugin {
         return resolveClientUrl(serverName);
     }
 
-    /**
-     * Resolve the backend WebSocket URL configured under {@code clients.<name>.url},
-     * falling back to {@code default} for blank or unknown names.
-     *
-     * @param clientName name of the backend client entry in config
-     * @return configured backend URL, or {@code ""} when unconfigured
-     */
+    /** Fall back only for absent entries; an explicitly disabled backend stays blocked. */
     public String resolveClientUrl(String clientName) {
         String normalized = clientName == null ? "default" : clientName.trim();
         if (normalized.isEmpty()) {
             normalized = "default";
         }
 
-        return configFile.getString("clients." + normalized + ".url", "");
+        String path = "clients." + normalized;
+        if (!configFile.has(path)) {
+            path = "clients.default";
+        }
+        return configFile.getBoolean(path + ".enabled", true)
+                ? configFile.getString(path + ".url", "") : "";
     }
 
     /**

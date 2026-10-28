@@ -70,14 +70,8 @@ public class VelocityConfigFile {
         return config.keySet();
     }
 
-    /**
-     * Check whether a top-level key exists.
-     *
-     * @param key top-level key name
-     * @return {@code true} if the key is present at the root level
-     */
     public boolean has(String key) {
-        return config.has(key);
+        return getRawValue(key) != null;
     }
 
     /**

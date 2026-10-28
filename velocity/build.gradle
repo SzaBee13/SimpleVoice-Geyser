@@ -21,6 +21,15 @@ dependencies {
     implementation("org.eclipse.jetty.websocket:websocket-servlet:11.0.25")
     implementation("org.eclipse.jetty.websocket:websocket-jetty-server:11.0.25")
     implementation("org.slf4j:slf4j-jdk14:2.0.16")
+
+    testImplementation(platform("org.junit:junit-bom:5.12.2"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("com.velocitypowered:velocity-api:${velocity_api_version}")
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+}
+
+tasks.test {
+    useJUnitPlatform()
 }
 
 tasks.processResources {

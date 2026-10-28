@@ -198,7 +198,13 @@ public final class ProxyWebSocket {
                 return;
             }
 
-            if (backendUrl == null || backendUrl.isBlank() || playerState.isOn(backendUrl)) {
+            if (backendUrl == null || backendUrl.isBlank()) {
+                String message = "Proxy backend is not configured for this server.";
+                sendRaw(ConnectionStates.MessageType.ERROR, message, true);
+                playerState.close(ConnectionStates.DisconnectCodes.FATAL_ERROR.getCode(), message);
+                return;
+            }
+            if (playerState.isOn(backendUrl)) {
                 return;
             }
 

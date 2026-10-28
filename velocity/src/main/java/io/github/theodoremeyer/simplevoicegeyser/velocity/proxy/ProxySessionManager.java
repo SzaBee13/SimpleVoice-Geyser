@@ -80,9 +80,7 @@ public final class ProxySessionManager {
         }
 
         String backendUrl = plugin.resolveClientUrl(event.getServer().getServerInfo().getName());
-        if (backendUrl != null && !backendUrl.isBlank()) {
-            socket.reconnectBackend(event.getServer().getServerInfo().getName(), backendUrl);
-        }
+        socket.reconnectBackend(event.getServer().getServerInfo().getName(), backendUrl);
     }
 
     /**
