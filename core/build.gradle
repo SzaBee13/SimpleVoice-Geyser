@@ -52,6 +52,14 @@ tasks.processResources {
                 )
             }
         }
+        filesMatching("manifest.json") {
+            filter { line ->
+                line.replace(
+                        "@@PROJECT_VERSION@@",
+                        project.version.toString()
+                )
+            }
+        }
     }
 }
 
