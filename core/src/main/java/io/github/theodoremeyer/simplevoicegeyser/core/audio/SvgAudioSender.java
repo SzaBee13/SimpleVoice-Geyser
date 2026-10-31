@@ -8,9 +8,10 @@ import io.github.theodoremeyer.simplevoicegeyser.core.SvgCore;
 
 import java.util.UUID;
 import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * Audio Sender to send Clients Audio to server
@@ -49,6 +50,8 @@ public final class SvgAudioSender {
                 return thread;
             }
     );
+    /** Set before draining the uplink queue so encode/deliver stop using a closing encoder. */
+    private final AtomicBoolean closed = new AtomicBoolean(false);
 
     /**
      * Class Constructor. Creates and registers the audio sender
@@ -83,7 +86,7 @@ public final class SvgAudioSender {
      * @param pcmData PCM16LE data to send
      */
     public void sendPcm16le(byte[] pcmData) {
-        if (pcmData == null) {
+        if (pcmData == null || closed.get()) {
             return;
         }
 
@@ -99,7 +102,7 @@ public final class SvgAudioSender {
      * @param opusData raw Opus packet data
      */
     public void sendEncodedOpus(byte[] opusData) {
-        if (opusData == null || opusData.length == 0) {
+        if (opusData == null || opusData.length == 0 || closed.get()) {
             return;
         }
 
@@ -112,6 +115,9 @@ public final class SvgAudioSender {
      * @param task task to run
      */
     private void enqueue(Runnable task) {
+        if (closed.get()) {
+            return;
+        }
         try {
             audioExecutor.execute(task);
         } catch (RejectedExecutionException e) {
@@ -120,6 +126,9 @@ public final class SvgAudioSender {
     }
 
     private void encodeAndSend(byte[] pcmData) {
+        if (closed.get()) {
+            return;
+        }
         byte[] encoded;
         try {
             short[] pcmShorts = serverApi.getAudioConverter().bytesToShorts(pcmData);
@@ -144,6 +153,9 @@ public final class SvgAudioSender {
     }
 
     private void deliver(byte[] opusPacket) {
+        if (closed.get()) {
+            return;
+        }
         try {
             if (!delegate.send(opusPacket)) {
                 SvgCore.getLogger().warning("[AudioSender] Failed to send audio for: " + playerUuid);
@@ -154,10 +166,26 @@ public final class SvgAudioSender {
     }
 
     /**
-     * Closes the AudioSender, and ends decoder
+     * Closes the AudioSender, and ends decoder.
+     * Marks closed first, drains the uplink worker, then closes the Opus encoder
+     * so encode cannot race with encoder.close().
      */
     public void unregister() {
-        audioExecutor.shutdownNow();
+        if (!closed.compareAndSet(false, true)) {
+            return;
+        }
+
+        audioExecutor.shutdown();
+        try {
+            if (!audioExecutor.awaitTermination(2, TimeUnit.SECONDS)) {
+                audioExecutor.shutdownNow();
+                audioExecutor.awaitTermination(1, TimeUnit.SECONDS);
+            }
+        } catch (InterruptedException e) {
+            audioExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+
         try {
             if (encoder != null) {
                 encoder.resetState();

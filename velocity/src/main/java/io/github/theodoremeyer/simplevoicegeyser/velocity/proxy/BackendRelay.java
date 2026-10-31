@@ -137,6 +137,11 @@ public final class BackendRelay {
      * @param reason human-readable close reason
      */
     public synchronized void close(int code, String reason) {
+        // Invalidate any in-flight connect() so a late handshake cannot
+        // assign backendSocket / send join after the browser session is gone.
+        currentConnectionId = connectionIdCounter.incrementAndGet();
+        joinPayload = null;
+        capabilitiesPayload = null;
         closeBackend(code, reason);
         closeClient(code, reason);
     }
